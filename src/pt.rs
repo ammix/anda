@@ -236,9 +236,12 @@ impl PseudoTerminalCtl {
             tokio::spawn(async move {
                 let res = tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("Received ctrl-c, sending sigint to child process");
+                        let Some(id) = out.id() else { return Err(eyre!("Received ctrl-c, exiting")); };
+                        tracing::info!("Received ctrl-c, sending sigkill to child process");
                         #[allow(clippy::cast_possible_wrap)]
-                        signal::kill(nix::unistd::Pid::from_raw(out.id().unwrap() as i32), signal::Signal::SIGINT).unwrap();
+                        if let Err(e) = signal::kill(nix::unistd::Pid::from_raw(id as i32), signal::Signal::SIGKILL) {
+                            tracing::error!(?e, "cannot kill pt child");
+                        }
                         Err(eyre!("Received ctrl-c, exiting"))
                     }
                     w = out.wait() => {
