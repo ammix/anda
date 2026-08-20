@@ -1,5 +1,5 @@
 use crate::{error::AndaxRes, run::rf};
-use core::str::FromStr;
+
 use git2::Remote;
 use rhai::{
     plugin::{export_module, Dynamic, EvalAltResult, NativeCallContext},
@@ -11,6 +11,20 @@ use std::env::VarError;
 use tracing::trace;
 
 type Res<T> = Result<T, Box<EvalAltResult>>;
+
+fn sort_git_tags(tags: &mut [String]) {
+    tags.sort_by(|a, b| {
+        let a_version = Version::parse(a.strip_prefix('v').unwrap_or(a));
+        let b_version = Version::parse(b.strip_prefix('v').unwrap_or(b));
+
+        match (a_version.ok(), b_version.ok()) {
+            (Some(a), Some(b)) => a.cmp(&b).then_with(|| a.to_string().cmp(&b.to_string())),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => a.cmp(b),
+        }
+    });
+}
 
 pub const USER_AGENT: &str = "AndaX";
 #[export_module]
@@ -619,7 +633,7 @@ pub mod ar {
         const TAGS_PREFIX: &str = "refs/tags/";
         const RESOLVED_SUFFIX: &str = "^{}";
 
-        let mut tags = rhai::Array::new();
+        let mut tags = Vec::new();
 
         let req = (AGENT.get(&format!("{url}/info/refs?service=git-upload-pack")))
             .header("Content-Type", "application/x-git-upload-pack-request");
@@ -645,12 +659,11 @@ pub mod ar {
                 continue;
             }
 
-            if let Ok(tag) = rhai::Dynamic::from_str(&name[TAGS_PREFIX.len()..]) {
-                tags.push(tag);
-            }
+            tags.push(name[TAGS_PREFIX.len()..].to_owned());
         }
 
-        Ok(tags)
+        sort_git_tags(&mut tags);
+        Ok(tags.into_iter().map(rhai::Dynamic::from).collect())
     }
 
     #[rhai_fn(skip)]
@@ -687,6 +700,35 @@ impl CustomType for Req {
             .with_fn("get", |ctx: NativeCallContext, x: Self| rf(&ctx, x.get()))
             .with_fn("redirects", Self::redirects)
             .with_fn("head", Self::head);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_git_tags;
+
+    #[test]
+    fn sorts_version_tags_semantically() {
+        let mut tags = vec![
+            "1.9.3".to_owned(),
+            "1.13.5".to_owned(),
+            "1.10.0".to_owned(),
+            "v2.0.0".to_owned(),
+            "nightly".to_owned(),
+        ];
+
+        sort_git_tags(&mut tags);
+
+        assert_eq!(tags, ["nightly", "1.9.3", "1.10.0", "1.13.5", "v2.0.0"]);
+    }
+
+    #[test]
+    fn sorts_prereleases_before_releases() {
+        let mut tags = vec!["1.13.5".to_owned(), "1.13.5-rc.1".to_owned(), "1.13.4".to_owned()];
+
+        sort_git_tags(&mut tags);
+
+        assert_eq!(tags, ["1.13.4", "1.13.5-rc.1", "1.13.5"]);
     }
 }
 
