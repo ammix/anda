@@ -209,12 +209,19 @@ pub mod ar {
         let Some(content_offset) = html[pre_start..].find('>') else {
             return Err(E::from("Could not find file contents in SourceArcade response."));
         };
-        let start = pre_start + content_offset + 1;
+        let Some(start) =
+            pre_start.checked_add(content_offset).and_then(|start| start.checked_add(1))
+        else {
+            return Err(E::from("Could not find file contents in SourceArcade response."));
+        };
         let Some(end) = html[start..].find("</pre>") else {
             return Err(E::from("Could not find file contents in SourceArcade response."));
         };
+        let Some(end) = start.checked_add(end) else {
+            return Err(E::from("Could not find file contents in SourceArcade response."));
+        };
 
-        Ok(html[start..start + end]
+        Ok(html[start..end]
             .replace("&amp;", "&")
             .replace("&lt;", "<")
             .replace("&gt;", ">")
@@ -703,6 +710,27 @@ impl CustomType for Req {
     }
 }
 
+impl Req {
+    pub const fn new(url: String) -> Self {
+        Self { url, headers: vec![], redirects: 0 }
+    }
+    pub fn get(self) -> color_eyre::Result<String> {
+        let cfg = ureq::Agent::config_builder().max_redirects(self.redirects.try_into()?).build();
+        let r = ureq::Agent::new_with_config(cfg).get(&self.url);
+        let mut r = r.header("User-Agent", USER_AGENT);
+        for (k, v) in self.headers {
+            r = r.header(k.as_str(), v.as_str());
+        }
+        Ok(r.call()?.into_body().read_to_string()?)
+    }
+    pub fn head(&mut self, key: String, val: String) {
+        self.headers.push((key, val));
+    }
+    pub const fn redirects(&mut self, i: i64) {
+        self.redirects = i;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::sort_git_tags;
@@ -729,26 +757,5 @@ mod tests {
         sort_git_tags(&mut tags);
 
         assert_eq!(tags, ["1.13.4", "1.13.5-rc.1", "1.13.5"]);
-    }
-}
-
-impl Req {
-    pub const fn new(url: String) -> Self {
-        Self { url, headers: vec![], redirects: 0 }
-    }
-    pub fn get(self) -> color_eyre::Result<String> {
-        let cfg = ureq::Agent::config_builder().max_redirects(self.redirects.try_into()?).build();
-        let r = ureq::Agent::new_with_config(cfg).get(&self.url);
-        let mut r = r.header("User-Agent", USER_AGENT);
-        for (k, v) in self.headers {
-            r = r.header(k.as_str(), v.as_str());
-        }
-        Ok(r.call()?.into_body().read_to_string()?)
-    }
-    pub fn head(&mut self, key: String, val: String) {
-        self.headers.push((key, val));
-    }
-    pub const fn redirects(&mut self, i: i64) {
-        self.redirects = i;
     }
 }
