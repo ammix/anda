@@ -79,6 +79,21 @@ pub mod ar {
     }
 
     #[rhai_fn(return_raw, global)]
+    pub fn gh_tags(ctx: NativeCallContext, repo: &str) -> Res<rhai::Array> {
+        let req = (AGENT.get(&format!("https://api.github.com/repos/{repo}/tags")))
+            .header("Authorization", &format!("Bearer {}", internal_env("GITHUB_TOKEN")?))
+            .header("User-Agent", USER_AGENT);
+        let v: Value = req.call().ehdl(&ctx)?.into_body().read_json().ehdl(&ctx)?;
+        trace!("Got json from {repo}:\n{v}");
+        let tags = v.as_array().ok_or_else(|| E::from("gh_tags received not array"))?;
+        let mut names: Vec<String> =
+            tags.iter().filter_map(|tag| tag["name"].as_str().map(ToOwned::to_owned)).collect();
+
+        sort_git_tags(&mut names);
+        Ok(names.into_iter().map(rhai::Dynamic::from).collect())
+    }
+
+    #[rhai_fn(return_raw, global)]
     pub fn gh_tag(ctx: NativeCallContext, repo: &str) -> Res<String> {
         let req = (AGENT.get(&format!("https://api.github.com/repos/{repo}/tags")))
             .header("Authorization", &format!("Bearer {}", internal_env("GITHUB_TOKEN")?))
