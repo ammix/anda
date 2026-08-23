@@ -27,12 +27,17 @@ fn sort_git_tags(tags: &mut [String]) {
 }
 
 pub const USER_AGENT: &str = "AndaX";
+
 #[export_module]
 pub mod ar {
     type E = Box<rhai::EvalAltResult>;
 
     static AGENT: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
-        ureq::Agent::new_with_config(ureq::Agent::config_builder().build())
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_global(Some(std::time::Duration::from_secs(10)))
+                .build(),
+        )
     });
 
     #[rhai_fn(return_raw, global)]
